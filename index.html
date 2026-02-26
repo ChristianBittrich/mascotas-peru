@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root{
+      --radius:14px;
+      --shadow:0 6px 18px rgba(0,0,0,.12);
+      --border:1px solid rgba(0,0,0,.08);
+      --gap:14px;
+      --maxw:1150px;
+    }
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#fff;color:#111}
+    .wrap{max-width:var(--maxw);margin:0 auto;padding:18px}
+    .topbar{display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+    .search,.sel{
+      padding:10px 12px;border-radius:10px;border:var(--border);
+      outline:none;font-size:14px;background:#fff;
+    }
+    .search{flex:1;min-width:240px}
+    .sel{min-width:180px}
+    .status{font-size:12px;opacity:.7;margin-left:auto}
+    .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--gap)}
+    @media (max-width: 980px){.grid{grid-template-columns:repeat(2,1fr)}}
+    @media (max-width: 620px){.grid{grid-template-columns:1fr}}
+    .card{border:var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;background:#fff;display:flex;flex-direction:column;min-height:320px}
+    .img{width:100%;height:190px;background:#f3f4f6;overflow:hidden}
+    .img img{width:100%;height:100%;object-fit:cover;display:block}
+    .content{padding:12px 12px 14px;display:flex;flex-direction:column;gap:8px;flex:1}
+    .title{font-size:16px;font-weight:800;line-height:1.2;margin:0}
+    .meta{font-size:12px;opacity:.75;line-height:1.2}
+    .desc{font-size:13px;line-height:1.35;opacity:.9;margin:0;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+    .actions{margin-top:auto;display:flex;gap:10px;align-items:center}
+    .btn{display:inline-flex;justify-content:center;align-items:center;padding:10px 12px;border-radius:10px;text-decoration:none;font-weight:700;font-size:13px;border:var(--border);background:#111;color:#fff;flex:1;text-align:center}
+    .btn.secondary{background:#fff;color:#111}
+    .filters{display:flex;gap:10px;flex-wrap:wrap;width:100%}
+  </style>
+</head>
+<body>
+  <div class="wrap" id="top">
+    <div class="topbar">
+      <input id="q" class="search" placeholder="Buscar (nombre, descripción, distrito, raza...)" />
+      <div id="status" class="status"></div>
+    </div>
+
+    <div class="filters" aria-label="Filtros">
+      <select id="f_tipo" class="sel">
+        <option value="">Tipo: Todos</option>
+      </select>
+      <select id="f_especie" class="sel">
+        <option value="">Especie: Todas</option>
+      </select>
+      <select id="f_tamano" class="sel">
+        <option value="">Tamaño: Todos</option>
+      </select>
+      <select id="f_depto" class="sel">
+        <option value="">Departamento: Todos</option>
+      </select>
+      <input id="f_raza" class="search" style="flex:0 1 240px;min-width:240px" placeholder="Raza (texto)" />
+      <button id="clear" class="btn secondary" style="flex:0 0 auto">Limpiar filtros</button>
+    </div>
+
+    <div style="height:14px"></div>
+    <div id="grid" class="grid"></div>
+  </div>
+
+  <script>
+    // ========= CONFIGURA ESTO =========
+    const SHEET_ID = "1fkxjf9tgQQ8ErVRaMSXZ6Jt6fR0_-EfnDjT99XJyJP4";
+    const SHEET_NAME = "Publicaciones"; // o el nombre exacto de tu pestaña
+    // =================================
+
+    const GVIZ_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?sheet=${encodeURIComponent(SHEET_NAME)}&tq=${encodeURIComponent("select *")}`;
+
+    let allRows = [];
+    let activeRows = [];
+
+    function sanitizeText(s){
+      return String(s ?? "").replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+    }
+    function getCell(row, idx){
+      const cell = row[idx];
+      if (!cell) return "";
+      return cell.v ?? "";
+    }
+    function norm(s){ return String(s ?? "").trim().toLowerCase(); }
+
+    function isActive(val){
+      const v = norm(val);
+      return ["si","sí","true","activo","activa","1","yes"].includes(v);
+    }
+
+    function waLinkFromPhone(phone){
+      const digits = String(phone ?? "").replace(/[^0-9]/g,"");
+      if (!digits) return "";
+      const full = digits.startsWith("51") ? digits : ("51"+digits);
+      const msg = encodeURIComponent("Hola, vi tu publicación en Mascotas Perú y quiero ayudar.");
+      return `https://wa.me/${full}?text=${msg}`;
+    }
+
+    function uniqSorted(values){
+      return Array.from(new Set(values.filter(v => String(v).trim() !== "")))
+        .sort((a,b) => String(a).localeCompare(String(b), "es", {sensitivity:"base"}));
+    }
+
+    function fillSelect(selectEl, values){
+      const current = selectEl.value;
+      // conservar la primera opción (placeholder)
+      const first = selectEl.querySelector("option");
+      selectEl.innerHTML = "";
+      selectEl.appendChild(first);
+      for (const v of values){
+        const opt = document.createElement("option");
+        opt.value = v;
+        opt.textContent = v;
+        selectEl.appendChild(opt);
+      }
+      // restaurar si existe
+      if (current && values.includes(current)) selectEl.value = current;
+    }
+
+    function render(list){
+      const grid = document.getElementById("grid");
+      grid.innerHTML = "";
+
+      for (const r of list){
+        const foto = r.imagen || "";
+        const nombre = sanitizeText(r.nombre || "Sin nombre");
+        const desc = sanitizeText(r.descripcion || "");
+        const meta = sanitizeText([r.tipoCaso, r.especie, r.tamano, r.distrito, r.departamento].filter(Boolean).join(" • "));
+        const link = r.whatsapp || "";
+
+        const card = document.createElement("div");
+        card.className = "card";
+        card.innerHTML = `
+          <div class="img">${foto ? `<img src="${foto}" alt="${nombre}">` : ""}</div>
+          <div class="content">
+            <h3 class="title">${nombre}</h3>
+            <div class="meta">${meta}</div>
+            <p class="desc">${desc}</p>
+            <div class="actions">
+              ${link ? `<a class="btn" href="${link}" target="_blank" rel="noopener">Contactar</a>` : `<span class="btn secondary" style="pointer-events:none;opacity:.6;">Sin contacto</span>`}
+              <a class="btn secondary" href="#top" onclick="window.scrollTo({top:0,behavior:'smooth'})">Arriba</a>
+            </div>
+          </div>
+        `;
+        grid.appendChild(card);
+      }
+
+      document.getElementById("status").textContent = `${list.length} publicaciones activas`;
+    }
+
+    function applyFilters(){
+      const q = norm(document.getElementById("q").value);
+      const fTipo = document.getElementById("f_tipo").value;
+      const fEsp = document.getElementById("f_especie").value;
+      const fTam = document.getElementById("f_tamano").value;
+      const fDep = document.getElementById("f_depto").value;
+      const fRaza = norm(document.getElementById("f_raza").value);
+
+      const filtered = activeRows.filter(r => {
+        if (fTipo && r.tipoCaso !== fTipo) return false;
+        if (fEsp && r.especie !== fEsp) return false;
+        if (fTam && r.tamano !== fTam) return false;
+        if (fDep && r.departamento !== fDep) return false;
+        if (fRaza && !norm(r.raza).includes(fRaza)) return false;
+
+        if (q){
+          const hay = norm(`${r.nombre} ${r.descripcion} ${r.departamento} ${r.distrito} ${r.tipoCaso} ${r.especie} ${r.raza} ${r.tamano}`);
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+
+      render(filtered);
+    }
+
+    function clearFilters(){
+      document.getElementById("q").value = "";
+      document.getElementById("f_tipo").value = "";
+      document.getElementById("f_especie").value = "";
+      document.getElementById("f_tamano").value = "";
+      document.getElementById("f_depto").value = "";
+      document.getElementById("f_raza").value = "";
+      applyFilters();
+    }
+
+    async function load(){
+      document.getElementById("status").textContent = "Cargando...";
+      try{
+        const res = await fetch(GVIZ_URL);
+        const text = await res.text();
+        const json = JSON.parse(text.substring(text.indexOf("{"), text.lastIndexOf("}") + 1));
+
+        const table = json.table;
+        const cols = table.cols.map(c => (c.label || "").trim());
+        const data = table.rows.map(r => r.c.map(c => c || null));
+
+        // Índices por encabezado (tal cual tu lista)
+        const idxTipoCaso = cols.findIndex(x => x === "Tipo de caso");
+        const idxNombre  = cols.findIndex(x => x === "Nombre de la mascota");
+        const idxEspecie = cols.findIndex(x => x === "Especie");
+        const idxRaza    = cols.findIndex(x => x === "Raza");
+        const idxTam     = cols.findIndex(x => x === "Tamaño");
+        const idxDept    = cols.findIndex(x => x === "Departamento");
+        const idxDist    = cols.findIndex(x => x === "Distrito");
+        const idxDesc    = cols.findIndex(x => x === "Descripción detallada");
+        const idxTel     = cols.findIndex(x => x === "Teléfono de contacto");
+        const idxImg     = cols.findIndex(x => x === "Imagen");
+        const idxActivo  = cols.findIndex(x => x === "Caso Activo");
+
+        allRows = data.map(row => {
+          const tel = getCell(row, idxTel);
+          return {
+            tipoCaso: getCell(row, idxTipoCaso),
+            nombre: getCell(row, idxNombre),
+            especie: getCell(row, idxEspecie),
+            raza: getCell(row, idxRaza),
+            tamano: getCell(row, idxTam),
+            departamento: getCell(row, idxDept),
+            distrito: getCell(row, idxDist),
+            descripcion: getCell(row, idxDesc),
+            imagen: getCell(row, idxImg),
+            whatsapp: waLinkFromPhone(tel),
+            activo: getCell(row, idxActivo),
+          };
+        });
+
+        // Solo activos
+        activeRows = allRows
+          .filter(r => isActive(r.activo))
+          .filter(r => r.nombre || r.descripcion || r.imagen);
+
+        // Llenar selects con valores reales
+        fillSelect(document.getElementById("f_tipo"),   uniqSorted(activeRows.map(r => r.tipoCaso)));
+        fillSelect(document.getElementById("f_especie"),uniqSorted(activeRows.map(r => r.especie)));
+        fillSelect(document.getElementById("f_tamano"), uniqSorted(activeRows.map(r => r.tamano)));
+        fillSelect(document.getElementById("f_depto"),  uniqSorted(activeRows.map(r => r.departamento)));
+
+        // Eventos
+        ["q","f_tipo","f_especie","f_tamano","f_depto","f_raza"].forEach(id => {
+          document.getElementById(id).addEventListener("input", applyFilters);
+          document.getElementById(id).addEventListener("change", applyFilters);
+        });
+        document.getElementById("clear").addEventListener("click", clearFilters);
+
+        // Render inicial
+        render(activeRows);
+      } catch (e){
+        document.getElementById("status").textContent =
+          "Error cargando datos. Revisa que la hoja sea pública y que el nombre de la pestaña sea exacto.";
+        console.error(e);
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>

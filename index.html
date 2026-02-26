@@ -1,4 +1,4 @@
-<!doctype html>
+<!doctype html><!doctype html>
 <html lang="es">
 <head>
   <meta charset="utf-8" />
@@ -35,6 +35,7 @@
     .btn{display:inline-flex;justify-content:center;align-items:center;padding:10px 12px;border-radius:10px;text-decoration:none;font-weight:700;font-size:13px;border:var(--border);background:#111;color:#fff;flex:1;text-align:center}
     .btn.secondary{background:#fff;color:#111}
     .filters{display:flex;gap:10px;flex-wrap:wrap;width:100%}
+    .hint{font-size:12px;opacity:.7;margin:10px 0 0}
   </style>
 </head>
 <body>
@@ -61,6 +62,8 @@
       <button id="clear" class="btn secondary" style="flex:0 0 auto">Limpiar filtros</button>
     </div>
 
+    <div class="hint" id="hint"></div>
+
     <div style="height:14px"></div>
     <div id="grid" class="grid"></div>
   </div>
@@ -68,7 +71,7 @@
   <script>
     // ========= CONFIGURA ESTO =========
     const SHEET_ID = "1fkxjf9tgQQ8ErVRaMSXZ6Jt6fR0_-EfnDjT99XJyJP4";
-    const SHEET_NAME = "Publicaciones"; // o el nombre exacto de tu pestaña
+    const SHEET_NAME = "Publicaciones"; // NOMBRE EXACTO de tu pestaña
     // =================================
 
     const GVIZ_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?sheet=${encodeURIComponent(SHEET_NAME)}&tq=${encodeURIComponent("select *")}`;
@@ -80,6 +83,7 @@
       return String(s ?? "").replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
     }
     function getCell(row, idx){
+      if (idx < 0) return "";
       const cell = row[idx];
       if (!cell) return "";
       return cell.v ?? "";
@@ -87,8 +91,8 @@
     function norm(s){ return String(s ?? "").trim().toLowerCase(); }
 
     function isActive(val){
-      const v = norm(val);
-      return ["si","sí","true","activo","activa","1","yes"].includes(v);
+      const v = norm(val).replace(/\s+/g," ");
+      return ["si","sí","true","activo","activa","1","yes","verdadero","ok"].includes(v);
     }
 
     function waLinkFromPhone(phone){
@@ -100,13 +104,12 @@
     }
 
     function uniqSorted(values){
-      return Array.from(new Set(values.filter(v => String(v).trim() !== "")))
+      return Array.from(new Set(values.map(v => String(v || "").trim()).filter(v => v !== "")))
         .sort((a,b) => String(a).localeCompare(String(b), "es", {sensitivity:"base"}));
     }
 
     function fillSelect(selectEl, values){
       const current = selectEl.value;
-      // conservar la primera opción (placeholder)
       const first = selectEl.querySelector("option");
       selectEl.innerHTML = "";
       selectEl.appendChild(first);
@@ -116,8 +119,20 @@
         opt.textContent = v;
         selectEl.appendChild(opt);
       }
-      // restaurar si existe
       if (current && values.includes(current)) selectEl.value = current;
+    }
+
+    // --- Matching robusto de encabezados ---
+    function key(s){
+      return String(s || "")
+        .toLowerCase()
+        .trim()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g,"") // quita tildes
+        .replace(/\s+/g," "); // espacios múltiples
+    }
+    function findCol(cols, posibles){
+      const p = posibles.map(key);
+      return cols.findIndex(c => p.includes(key(c)));
     }
 
     function render(list){
@@ -128,7 +143,7 @@
         const foto = r.imagen || "";
         const nombre = sanitizeText(r.nombre || "Sin nombre");
         const desc = sanitizeText(r.descripcion || "");
-        const meta = sanitizeText([r.tipoCaso, r.especie, r.tamano, r.distrito, r.departamento].filter(Boolean).join(" • "));
+        const meta = sanitizeText([r.tipoCaso, r.especie, r.tamano, r.raza, r.distrito, r.departamento].filter(Boolean).join(" • "));
         const link = r.whatsapp || "";
 
         const card = document.createElement("div");
@@ -188,27 +203,36 @@
 
     async function load(){
       document.getElementById("status").textContent = "Cargando...";
+      document.getElementById("hint").textContent = "";
       try{
         const res = await fetch(GVIZ_URL);
         const text = await res.text();
+
+        // gviz retorna: google.visualization.Query.setResponse({...});
         const json = JSON.parse(text.substring(text.indexOf("{"), text.lastIndexOf("}") + 1));
 
         const table = json.table;
         const cols = table.cols.map(c => (c.label || "").trim());
         const data = table.rows.map(r => r.c.map(c => c || null));
 
-        // Índices por encabezado (tal cual tu lista)
-        const idxTipoCaso = cols.findIndex(x => x === "Tipo de caso");
-        const idxNombre  = cols.findIndex(x => x === "Nombre de la mascota");
-        const idxEspecie = cols.findIndex(x => x === "Especie");
-        const idxRaza    = cols.findIndex(x => x === "Raza");
-        const idxTam     = cols.findIndex(x => x === "Tamaño");
-        const idxDept    = cols.findIndex(x => x === "Departamento");
-        const idxDist    = cols.findIndex(x => x === "Distrito");
-        const idxDesc    = cols.findIndex(x => x === "Descripción detallada");
-        const idxTel     = cols.findIndex(x => x === "Teléfono de contacto");
-        const idxImg     = cols.findIndex(x => x === "Imagen");
-        const idxActivo  = cols.findIndex(x => x === "Caso Activo");
+        // Encontrar columnas con tolerancia (variantes)
+        const idxTipoCaso = findCol(cols, ["Tipo de caso", "Tipo", "Tipo de Caso"]);
+        const idxNombre   = findCol(cols, ["Nombre de la mascota", "Nombre Mascota", "Nombre", "Nombre_Mascota"]);
+        const idxEspecie  = findCol(cols, ["Especie"]);
+        const idxRaza     = findCol(cols, ["Raza"]);
+        const idxTam      = findCol(cols, ["Tamaño", "Tamano"]);
+        const idxDept     = findCol(cols, ["Departamento", "Dpto", "Depto"]);
+        const idxDist     = findCol(cols, ["Distrito"]);
+        const idxDesc     = findCol(cols, ["Descripción detallada", "Descripcion detallada", "Descripción", "Descripcion"]);
+        const idxTel      = findCol(cols, ["Teléfono de contacto", "Telefono de contacto", "Teléfono", "Telefono", "Tlf", "Celular"]);
+        const idxImg      = findCol(cols, ["Imagen", "Foto", "Foto URL", "Imagen URL"]);
+        const idxActivo   = findCol(cols, ["Caso Activo", "Caso activo", "Activo", "Activa", "Columna 17"]);
+
+        // Mensaje de ayuda si algo no calza
+        if (idxActivo < 0){
+          document.getElementById("hint").textContent =
+            "No se encontró la columna 'Caso Activo' (o equivalente). Revisa el nombre del encabezado en tu hoja.";
+        }
 
         allRows = data.map(row => {
           const tel = getCell(row, idxTel);
@@ -227,9 +251,9 @@
           };
         });
 
-        // Solo activos
+        // Filtrar solo activos (si existe la col)
         activeRows = allRows
-          .filter(r => isActive(r.activo))
+          .filter(r => idxActivo < 0 ? true : isActive(r.activo))
           .filter(r => r.nombre || r.descripcion || r.imagen);
 
         // Llenar selects con valores reales
@@ -247,9 +271,18 @@
 
         // Render inicial
         render(activeRows);
+
+        // Si quedó vacío, mostrar pista útil
+        if (activeRows.length === 0){
+          document.getElementById("hint").textContent =
+            "No hay publicaciones que pasen el filtro. Verifica que 'Caso Activo' tenga valores como: Sí / si / TRUE / 1 / Activo.";
+        }
+
       } catch (e){
         document.getElementById("status").textContent =
           "Error cargando datos. Revisa que la hoja sea pública y que el nombre de la pestaña sea exacto.";
+        document.getElementById("hint").textContent =
+          "Tip: Google Sheet → Compartir → Cualquiera con el enlace → Lector.";
         console.error(e);
       }
     }
@@ -257,4 +290,5 @@
     load();
   </script>
 </body>
+</html>
 </html>

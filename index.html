@@ -29,6 +29,7 @@
     .filters{display:flex;gap:10px;flex-wrap:wrap;width:100%}
   </style>
 </head>
+
 <body>
   <div class="wrap" id="top">
     <div class="topbar">
@@ -53,27 +54,29 @@
   <script>
     // ========= CONFIGURA ESTO =========
     const SHEET_ID = "1fkxjf9tgQQ8ErVRaMSXZ6Jt6fR0_-EfnDjT99XJyJP4";
-    const SHEET_NAME = "Publicaciones";
+    const SHEET_NAME = "Publicaciones"; // EXACTO
     // =================================
 
-    const GVIZ_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?sheet=${encodeURIComponent(SHEET_NAME)}&tq=${encodeURIComponent("select *")}`;
+    const GVIZ_URL =
+      `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?sheet=${encodeURIComponent(SHEET_NAME)}&tq=${encodeURIComponent("select *")}`;
 
-    // === MAPEADO POR POSICIÓN (A=0, B=1, C=2...) ===
-    // Ajusta estos números SOLO si tu orden es distinto:
+    // === Mapeo exacto por tus columnas A..Q (0-index) ===
     const IDX = {
-      tipoCaso: 0,       // A
-      nombre: 1,         // B
-      especie: 2,        // C
-      raza: 3,           // D
-      tamano: 4,         // E
-      departamento: 5,   // F
-      provincia: 6,      // G (no se usa en tarjeta)
-      distrito: 7,       // H
-      fecha: 8,          // I (no se usa)
-      descripcion: 9,    // J
-      telefono: 10,      // K
-      imagen: 11,        // L
-      activo: 12         // M
+      tipoCaso: 2,       // C
+      nombre: 3,         // D
+      especie: 4,        // E
+      raza: 5,           // F
+      tamano: 6,         // G
+      departamento: 7,   // H
+      provincia: 8,      // I (no se usa)
+      distrito: 9,       // J
+      fecha: 10,         // K (no se usa)
+      descripcion: 11,   // L
+      telefono: 12,      // M
+      imagen: 13,        // N
+      aceptaDatos: 14,   // O (no se usa)
+      activo: 15         // P  <-- Caso Activo
+      // Q es 16 (Columna 17), no se usa
     };
 
     let activeRows = [];
@@ -87,10 +90,13 @@
       if (!cell) return "";
       return (cell.v ?? "");
     }
+
+    // Acepta muchos valores para "activo"
     function isActive(val){
       const v = norm(val).replace(/\s+/g," ");
       return ["si","sí","true","1","activo","activa","yes","verdadero","ok","v","x"].includes(v);
     }
+
     function waLinkFromPhone(phone){
       const digits = String(phone ?? "").replace(/[^0-9]/g,"");
       if (!digits) return "";
@@ -98,10 +104,12 @@
       const msg = encodeURIComponent("Hola, vi tu publicación en Mascotas Perú y quiero ayudar.");
       return `https://wa.me/${full}?text=${msg}`;
     }
+
     function uniqSorted(values){
       return Array.from(new Set(values.map(v => String(v || "").trim()).filter(v => v !== "")))
         .sort((a,b) => String(a).localeCompare(String(b), "es", {sensitivity:"base"}));
     }
+
     function fillSelect(selectEl, values){
       const first = selectEl.querySelector("option");
       const current = selectEl.value;
@@ -119,6 +127,7 @@
     function render(list){
       const grid = document.getElementById("grid");
       grid.innerHTML = "";
+
       for (const r of list){
         const foto = r.imagen || "";
         const nombre = sanitizeText(r.nombre || "Sin nombre");
@@ -142,7 +151,8 @@
         `;
         grid.appendChild(card);
       }
-      document.getElementById("status").textContent = `${list.length} publicaciones`;
+
+      document.getElementById("status").textContent = `${list.length} publicaciones activas`;
     }
 
     function applyFilters(){
@@ -224,17 +234,25 @@
 
         render(activeRows);
 
-        hint.textContent =
-          "Si no aparece nada: revisa que tu columna 'Caso Activo' (columna M) tenga valores tipo Sí/TRUE/1/Activo.";
+        // Pista útil si quedó vacío
+        if (activeRows.length === 0){
+          hint.textContent =
+            "Cargó la hoja, pero no hay filas activas según la columna P (Caso Activo). " +
+            "Asegura que diga: Sí / si / TRUE / 1 / Activo.";
+        } else {
+          hint.textContent = "OK: mostrando solo casos activos (columna P).";
+        }
 
       } catch (e){
         document.getElementById("status").textContent = "Error cargando datos.";
         hint.textContent =
-          "Revisa: 1) Sheet público (Cualquiera con el enlace → Lector), 2) La hoja se llama exactamente 'Publicaciones', 3) Tu orden de columnas A..M coincide con el mapeo IDX.";
+          "Revisa: 1) Sheet público (Compartir → Cualquiera con el enlace → Lector) " +
+          "2) El nombre de pestaña es exacto: '" + SHEET_NAME + "'.";
         console.error(e);
       }
     }
 
+    document.getElementById("clear").addEventListener("click", clearFilters);
     load();
   </script>
 </body>

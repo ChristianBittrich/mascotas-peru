@@ -52,27 +52,31 @@
   </div>
 
   <script>
+    // ========= CONFIGURA ESTO =========
     const SHEET_ID = "1fkxjf9tgQQ8ErVRaMSXZ6Jt6fR0_-EfnDjT99XJyJP4";
-    const SHEET_NAME = "Publicaciones";
+    const SHEET_NAME = "Publicaciones"; // EXACTO
+    // =================================
 
     const GVIZ_URL =
       `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?sheet=${encodeURIComponent(SHEET_NAME)}&tq=${encodeURIComponent("select *")}`;
 
+    // === Mapeo exacto por tus columnas A..Q (0-index) ===
     const IDX = {
-      tipoCaso: 3,
-      nombre: 4,
-      especie: 5,
-      raza: 6,
-      tamano: 7,
-      departamento: 8,
-      provincia: 9,
-      distrito: 10,
-      fecha: 11,
-      descripcion: 12,
-      telefono: 13,
-      imagen: 14,
-      aceptaDatos: 15,
-      activo: 16
+      tipoCaso: 3,       // C
+      nombre: 4,         // D
+      especie: 5,        // E
+      raza: 6,           // F
+      tamano: 7,         // G
+      departamento: 8,   // H
+      provincia: 9,      // I (no se usa)
+      distrito: 10,       // J
+      fecha: 11,         // K (no se usa)
+      descripcion: 12,   // L
+      telefono: 13,      // M
+      imagen: 14,        // N
+      aceptaDatos: 15,   // O (no se usa)
+      activo: 16         // P  <-- Caso Activo
+      // Q es 17 (Columna 17), no se usa
     };
 
     let activeRows = [];
@@ -87,6 +91,7 @@
       return (cell.v ?? "");
     }
 
+    // Acepta muchos valores para "activo"
     function isActive(val){
       const v = norm(val).replace(/\s+/g," ");
       return ["si","sí","true","1","activo","activa","yes","verdadero","ok","v","x"].includes(v);
@@ -229,6 +234,7 @@
 
         render(activeRows);
 
+        // Pista útil si quedó vacío
         if (activeRows.length === 0){
           hint.textContent =
             "Cargó la hoja, pero no hay filas activas según la columna P (Caso Activo). " +

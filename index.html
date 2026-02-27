@@ -12,7 +12,7 @@
     .search{flex:1;min-width:240px}
     .sel{min-width:180px}
     .status{font-size:12px;opacity:.7;margin-left:auto}
-    .hint{font-size:12px;opacity:.75;margin:10px 0 0}
+    .hint{font-size:12px;opacity:.75;margin:10px 0 0;white-space:pre-wrap}
     .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--gap)}
     @media (max-width: 980px){.grid{grid-template-columns:repeat(2,1fr)}}
     @media (max-width: 620px){.grid{grid-template-columns:1fr}}
@@ -57,26 +57,29 @@
     const SHEET_NAME = "Publicaciones"; // EXACTO
     // =================================
 
+    // Anti-caché: agrega un query param único
     const GVIZ_URL =
-      `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?sheet=${encodeURIComponent(SHEET_NAME)}&tq=${encodeURIComponent("select *")}`;
+      `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?` +
+      `sheet=${encodeURIComponent(SHEET_NAME)}` +
+      `&tq=${encodeURIComponent("select *")}` +
+      `&tqx=out:json` +
+      `&_=${Date.now()}`;
 
-    // === Mapeo exacto por tus columnas A..Q (0-index) ===
     const IDX = {
-      tipoCaso: 3,       // C
-      nombre: 4,         // D
-      especie: 5,        // E
-      raza: 6,           // F
-      tamano: 7,         // G
-      departamento: 8,   // H
-      provincia: 9,      // I (no se usa)
-      distrito: 10,       // J
-      fecha: 11,         // K (no se usa)
-      descripcion: 12,   // L
-      telefono: 13,      // M
-      imagen: 14,        // N
-      aceptaDatos: 15,   // O (no se usa)
-      activo: 16         // P  <-- Caso Activo
-      // Q es 17 (Columna 17), no se usa
+      tipoCaso: 3,
+      nombre: 4,
+      especie: 5,
+      raza: 6,
+      tamano: 7,
+      departamento: 8,
+      provincia: 9,
+      distrito: 10,
+      fecha: 11,
+      descripcion: 12,
+      telefono: 13,
+      imagen: 14,
+      aceptaDatos: 15,
+      activo: 16
     };
 
     let activeRows = [];
@@ -91,7 +94,6 @@
       return (cell.v ?? "");
     }
 
-    // Acepta muchos valores para "activo"
     function isActive(val){
       const v = norm(val).replace(/\s+/g," ");
       return ["si","sí","true","1","activo","activa","yes","verdadero","ok","v","x"].includes(v);
@@ -190,15 +192,33 @@
       applyFilters();
     }
 
+    function parseGviz(text){
+      // GViz devuelve algo tipo: google.visualization.Query.setResponse({...});
+      const start = text.indexOf("{");
+      const end = text.lastIndexOf("}");
+      if (start < 0 || end < 0) return null;
+      return JSON.parse(text.substring(start, end + 1));
+    }
+
     async function load(){
       const hint = document.getElementById("hint");
       document.getElementById("status").textContent = "Cargando...";
       hint.textContent = "";
 
       try{
-        const res = await fetch(GVIZ_URL);
+        const res = await fetch(GVIZ_URL, { cache: "no-store" });
         const text = await res.text();
-        const json = JSON.parse(text.substring(text.indexOf("{"), text.lastIndexOf("}") + 1));
+
+        const json = parseGviz(text);
+        if (!json || !json.table){
+          hint.textContent =
+            "No llegó JSON válido desde Google Sheets.\n" +
+            "Causa típica: permisos (sheet no público) o estás abriendo el HTML como file://\n\n" +
+            "Respuesta recibida (primeros 200 chars):\n" + text.slice(0,200);
+          document.getElementById("status").textContent = "Error leyendo la hoja";
+          return;
+        }
+
         const table = json.table;
         const data = table.rows.map(r => r.c.map(c => c || null));
 
@@ -234,20 +254,21 @@
 
         render(activeRows);
 
-        // Pista útil si quedó vacío
         if (activeRows.length === 0){
           hint.textContent =
-            "Cargó la hoja, pero no hay filas activas según la columna P (Caso Activo). " +
+            "Cargó la hoja, pero no hay filas activas según Caso Activo.\n" +
             "Asegura que diga: Sí / si / TRUE / 1 / Activo.";
         } else {
-          hint.textContent = "OK: mostrando solo casos activos (columna P).";
+          hint.textContent = "OK: mostrando solo casos activos.";
         }
 
       } catch (e){
         document.getElementById("status").textContent = "Error cargando datos.";
-        hint.textContent =
-          "Revisa: 1) Sheet público (Compartir → Cualquiera con el enlace → Lector) " +
-          "2) El nombre de pestaña es exacto: '" + SHEET_NAME + "'.";
+        document.getElementById("hint").textContent =
+          "Fallo de red/permiso.\n" +
+          "1) Asegura que el Sheet sea público (cualquiera con enlace: lector)\n" +
+          "2) Abre esto por https (GitHub Pages / Live Server), no por file://\n\n" +
+          "Detalle: " + String(e);
         console.error(e);
       }
     }

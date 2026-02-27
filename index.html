@@ -1,26 +1,21 @@
-<!doctype html><!doctype html>
+<!doctype html>
 <html lang="es">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
     :root{
-      --radius:14px;
-      --shadow:0 6px 18px rgba(0,0,0,.12);
-      --border:1px solid rgba(0,0,0,.08);
-      --gap:14px;
-      --maxw:1150px;
+      --radius:14px; --shadow:0 6px 18px rgba(0,0,0,.12);
+      --border:1px solid rgba(0,0,0,.08); --gap:14px; --maxw:1150px;
     }
     body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#fff;color:#111}
     .wrap{max-width:var(--maxw);margin:0 auto;padding:18px}
     .topbar{display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
-    .search,.sel{
-      padding:10px 12px;border-radius:10px;border:var(--border);
-      outline:none;font-size:14px;background:#fff;
-    }
+    .search,.sel{padding:10px 12px;border-radius:10px;border:var(--border);outline:none;font-size:14px;background:#fff}
     .search{flex:1;min-width:240px}
     .sel{min-width:180px}
     .status{font-size:12px;opacity:.7;margin-left:auto}
+    .hint{font-size:12px;opacity:.75;margin:10px 0 0;white-space:pre-wrap}
     .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--gap)}
     @media (max-width: 980px){.grid{grid-template-columns:repeat(2,1fr)}}
     @media (max-width: 620px){.grid{grid-template-columns:1fr}}
@@ -35,7 +30,6 @@
     .btn{display:inline-flex;justify-content:center;align-items:center;padding:10px 12px;border-radius:10px;text-decoration:none;font-weight:700;font-size:13px;border:var(--border);background:#111;color:#fff;flex:1;text-align:center}
     .btn.secondary{background:#fff;color:#111}
     .filters{display:flex;gap:10px;flex-wrap:wrap;width:100%}
-    .hint{font-size:12px;opacity:.7;margin:10px 0 0}
   </style>
 </head>
 <body>
@@ -46,18 +40,10 @@
     </div>
 
     <div class="filters" aria-label="Filtros">
-      <select id="f_tipo" class="sel">
-        <option value="">Tipo: Todos</option>
-      </select>
-      <select id="f_especie" class="sel">
-        <option value="">Especie: Todas</option>
-      </select>
-      <select id="f_tamano" class="sel">
-        <option value="">Tamaño: Todos</option>
-      </select>
-      <select id="f_depto" class="sel">
-        <option value="">Departamento: Todos</option>
-      </select>
+      <select id="f_tipo" class="sel"><option value="">Tipo: Todos</option></select>
+      <select id="f_especie" class="sel"><option value="">Especie: Todas</option></select>
+      <select id="f_tamano" class="sel"><option value="">Tamaño: Todos</option></select>
+      <select id="f_depto" class="sel"><option value="">Departamento: Todos</option></select>
       <input id="f_raza" class="search" style="flex:0 1 240px;min-width:240px" placeholder="Raza (texto)" />
       <button id="clear" class="btn secondary" style="flex:0 0 auto">Limpiar filtros</button>
     </div>
@@ -71,28 +57,34 @@
   <script>
     // ========= CONFIGURA ESTO =========
     const SHEET_ID = "1fkxjf9tgQQ8ErVRaMSXZ6Jt6fR0_-EfnDjT99XJyJP4";
-    const SHEET_NAME = "Publicaciones"; // NOMBRE EXACTO de tu pestaña
+    const SHEET_NAME = "Publicaciones"; // EXACTO como se ve abajo en tu Google Sheet
     // =================================
 
     const GVIZ_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?sheet=${encodeURIComponent(SHEET_NAME)}&tq=${encodeURIComponent("select *")}`;
 
-    let allRows = [];
     let activeRows = [];
 
     function sanitizeText(s){
       return String(s ?? "").replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
     }
+    function norm(s){ return String(s ?? "").trim().toLowerCase(); }
+    function key(s){
+      return String(s ?? "")
+        .toLowerCase()
+        .trim()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g,"") // quita tildes
+        .replace(/\s+/g," "); // espacios múltiples
+    }
     function getCell(row, idx){
-      if (idx < 0) return "";
+      if (idx == null || idx < 0) return "";
       const cell = row[idx];
       if (!cell) return "";
-      return cell.v ?? "";
+      return (cell.v ?? "");
     }
-    function norm(s){ return String(s ?? "").trim().toLowerCase(); }
 
     function isActive(val){
       const v = norm(val).replace(/\s+/g," ");
-      return ["si","sí","true","activo","activa","1","yes","verdadero","ok"].includes(v);
+      return ["si","sí","true","1","activo","activa","yes","verdadero","ok","v","x"].includes(v);
     }
 
     function waLinkFromPhone(phone){
@@ -109,8 +101,8 @@
     }
 
     function fillSelect(selectEl, values){
-      const current = selectEl.value;
       const first = selectEl.querySelector("option");
+      const current = selectEl.value;
       selectEl.innerHTML = "";
       selectEl.appendChild(first);
       for (const v of values){
@@ -122,17 +114,19 @@
       if (current && values.includes(current)) selectEl.value = current;
     }
 
-    // --- Matching robusto de encabezados ---
-    function key(s){
-      return String(s || "")
-        .toLowerCase()
-        .trim()
-        .normalize("NFD").replace(/[\u0300-\u036f]/g,"") // quita tildes
-        .replace(/\s+/g," "); // espacios múltiples
+    // Busca una columna si su encabezado "contiene" ciertas palabras
+    function findColContains(cols, words){
+      const w = words.map(key);
+      return cols.findIndex(c => {
+        const kc = key(c);
+        return w.every(word => kc.includes(word));
+      });
     }
-    function findCol(cols, posibles){
-      const p = posibles.map(key);
-      return cols.findIndex(c => p.includes(key(c)));
+
+    // Busca por cualquier variante exacta
+    function findColAny(cols, variants){
+      const vv = variants.map(key);
+      return cols.findIndex(c => vv.includes(key(c)));
     }
 
     function render(list){
@@ -163,7 +157,7 @@
         grid.appendChild(card);
       }
 
-      document.getElementById("status").textContent = `${list.length} publicaciones activas`;
+      document.getElementById("status").textContent = `${list.length} publicaciones`;
     }
 
     function applyFilters(){
@@ -203,38 +197,45 @@
 
     async function load(){
       document.getElementById("status").textContent = "Cargando...";
-      document.getElementById("hint").textContent = "";
+      const hint = document.getElementById("hint");
+      hint.textContent = "";
+
       try{
         const res = await fetch(GVIZ_URL);
         const text = await res.text();
-
-        // gviz retorna: google.visualization.Query.setResponse({...});
         const json = JSON.parse(text.substring(text.indexOf("{"), text.lastIndexOf("}") + 1));
 
         const table = json.table;
         const cols = table.cols.map(c => (c.label || "").trim());
         const data = table.rows.map(r => r.c.map(c => c || null));
 
-        // Encontrar columnas con tolerancia (variantes)
-        const idxTipoCaso = findCol(cols, ["Tipo de caso", "Tipo", "Tipo de Caso"]);
-        const idxNombre   = findCol(cols, ["Nombre de la mascota", "Nombre Mascota", "Nombre", "Nombre_Mascota"]);
-        const idxEspecie  = findCol(cols, ["Especie"]);
-        const idxRaza     = findCol(cols, ["Raza"]);
-        const idxTam      = findCol(cols, ["Tamaño", "Tamano"]);
-        const idxDept     = findCol(cols, ["Departamento", "Dpto", "Depto"]);
-        const idxDist     = findCol(cols, ["Distrito"]);
-        const idxDesc     = findCol(cols, ["Descripción detallada", "Descripcion detallada", "Descripción", "Descripcion"]);
-        const idxTel      = findCol(cols, ["Teléfono de contacto", "Telefono de contacto", "Teléfono", "Telefono", "Tlf", "Celular"]);
-        const idxImg      = findCol(cols, ["Imagen", "Foto", "Foto URL", "Imagen URL"]);
-        const idxActivo   = findCol(cols, ["Caso Activo", "Caso activo", "Activo", "Activa", "Columna 17"]);
+        // --- Detectores para hoja "Publicaciones" (no Forms) ---
+        // Ajustados para que funcionen aunque tus headers sean distintos.
+        const idxTipoCaso = findColAny(cols, ["Tipo", "Tipo de caso", "TipoCaso"]);
+        const idxNombre   = findColContains(cols, ["nombre"]); // "Nombre de la mascota", "Nombre Mascota", etc.
+        const idxEspecie  = findColAny(cols, ["Especie"]);
+        const idxRaza     = findColAny(cols, ["Raza"]);
+        const idxTam      = findColAny(cols, ["Tamaño", "Tamano"]);
+        const idxDept     = findColContains(cols, ["depart"]); // Departamento / Depto / Dpto
+        const idxDist     = findColAny(cols, ["Distrito"]);
+        const idxDesc     = findColContains(cols, ["descrip"]); // Descripción / Descripción detallada
+        const idxTel      = findColContains(cols, ["tel"]); // Teléfono / Telefono / Celular
+        const idxImg      = findColAny(cols, ["Imagen", "Foto", "Foto_URL", "Foto URL", "Imagen URL"]);
 
-        // Mensaje de ayuda si algo no calza
-        if (idxActivo < 0){
-          document.getElementById("hint").textContent =
-            "No se encontró la columna 'Caso Activo' (o equivalente). Revisa el nombre del encabezado en tu hoja.";
-        }
+        // Caso Activo: detecta por "activo" o por "caso"+"activo"
+        let idxActivo = findColAny(cols, ["Caso Activo", "Activo", "Activa"]);
+        if (idxActivo < 0) idxActivo = findColContains(cols, ["activo"]);
+        if (idxActivo < 0) idxActivo = findColContains(cols, ["caso","activo"]);
 
-        allRows = data.map(row => {
+        // Mostrar qué detectó (para que no dependas de consola)
+        hint.textContent =
+          "Encabezados detectados:\n- " + cols.join("\n- ") +
+          "\n\nDetección:\n" +
+          `Tipo=${idxTipoCaso+1} | Nombre=${idxNombre+1} | Especie=${idxEspecie+1} | Raza=${idxRaza+1} | Tamaño=${idxTam+1}\n` +
+          `Departamento=${idxDept+1} | Distrito=${idxDist+1} | Descripción=${idxDesc+1} | Teléfono=${idxTel+1} | Imagen=${idxImg+1}\n` +
+          `Caso Activo=${idxActivo >= 0 ? (idxActivo+1) : "NO DETECTADO"}`;
+
+        const allRows = data.map(row => {
           const tel = getCell(row, idxTel);
           return {
             tipoCaso: getCell(row, idxTipoCaso),
@@ -249,40 +250,34 @@
             whatsapp: waLinkFromPhone(tel),
             activo: getCell(row, idxActivo),
           };
-        });
+        }).filter(r => r.nombre || r.descripcion || r.imagen);
 
-        // Filtrar solo activos (si existe la col)
-        activeRows = allRows
-          .filter(r => idxActivo < 0 ? true : isActive(r.activo))
-          .filter(r => r.nombre || r.descripcion || r.imagen);
+        // Si no detectó la columna, NO filtra (para no quedarte en blanco)
+        activeRows = (idxActivo >= 0)
+          ? allRows.filter(r => isActive(r.activo))
+          : allRows;
 
-        // Llenar selects con valores reales
         fillSelect(document.getElementById("f_tipo"),   uniqSorted(activeRows.map(r => r.tipoCaso)));
         fillSelect(document.getElementById("f_especie"),uniqSorted(activeRows.map(r => r.especie)));
         fillSelect(document.getElementById("f_tamano"), uniqSorted(activeRows.map(r => r.tamano)));
         fillSelect(document.getElementById("f_depto"),  uniqSorted(activeRows.map(r => r.departamento)));
 
-        // Eventos
         ["q","f_tipo","f_especie","f_tamano","f_depto","f_raza"].forEach(id => {
           document.getElementById(id).addEventListener("input", applyFilters);
           document.getElementById(id).addEventListener("change", applyFilters);
         });
         document.getElementById("clear").addEventListener("click", clearFilters);
 
-        // Render inicial
         render(activeRows);
 
-        // Si quedó vacío, mostrar pista útil
-        if (activeRows.length === 0){
-          document.getElementById("hint").textContent =
-            "No hay publicaciones que pasen el filtro. Verifica que 'Caso Activo' tenga valores como: Sí / si / TRUE / 1 / Activo.";
+        if (idxActivo >= 0 && activeRows.length === 0){
+          hint.textContent += "\n\n⚠️ Se detectó 'Caso Activo' pero ninguna fila calza como activa.\nUsa valores: Sí / si / TRUE / 1 / Activo.";
         }
 
       } catch (e){
-        document.getElementById("status").textContent =
-          "Error cargando datos. Revisa que la hoja sea pública y que el nombre de la pestaña sea exacto.";
-        document.getElementById("hint").textContent =
-          "Tip: Google Sheet → Compartir → Cualquiera con el enlace → Lector.";
+        document.getElementById("status").textContent = "Error cargando datos.";
+        hint.textContent =
+          "Revisa:\n1) Tu Google Sheet está público: Compartir → Cualquiera con el enlace → Lector\n2) El nombre de pestaña es exacto: '" + SHEET_NAME + "'\n3) La fila 1 contiene los encabezados.";
         console.error(e);
       }
     }
@@ -290,5 +285,4 @@
     load();
   </script>
 </body>
-</html>
 </html>
